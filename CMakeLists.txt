@@ -8,7 +8,7 @@ include(CTest)
 option(EYE_BUILD_APP "Build the raylib window (disable for CPU-only tests)" ON)
 set(RAYLIB_ROOT "" CACHE PATH "Optional prebuilt raylib directory containing include/ and lib/")
 
-add_library(ascii_scene STATIC scene.c celebration.c)
+add_library(ascii_scene STATIC scene.c celebration.c intro.c)
 target_include_directories(ascii_scene PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 if(NOT MSVC)
     target_link_libraries(ascii_scene PUBLIC m)

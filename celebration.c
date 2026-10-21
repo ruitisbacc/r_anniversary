@@ -154,20 +154,6 @@ static void limb(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point a,Point b,float ra
     int steps=(int)(distance/0.012f)+1;
     for (int k=0;k<=steps;k++) ellipse(grid,point_mix(a,b,(float)k/(float)steps),radius,radius,color,'o');
 }
-static void dress(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float sway) {
-    for (int row=0;row<SCENE_ROWS;row++) {
-        float y=world_y(row),u=(y-0.10f)/0.46f;
-        if (u<0 || u>1) continue;
-        float half=lerp(0.085f,0.215f,u),center=0.43f+sway*u;
-        for (int col=0;col<SCENE_COLS;col++) {
-            float x=world_x(col)-center;
-            if (fabsf(x)<half) {
-                float pleat=0.72f+0.28f*cosf(x*80-u*3);
-                paint(grid,col,row,(Tint){0.83f,0.40f,0.72f},pleat,fabsf(x)>half-0.02f?'/':'v');
-            }
-        }
-    }
-}
 static void bouquet(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point hand) {
     for (int k=0;k<7;k++) {
         float angle=6.2831853f*(float)k/7;
@@ -185,66 +171,201 @@ static void bouquet(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point hand) {
     }
     ellipse(grid,hand,0.025f,0.018f,gold,'X');
 }
+/* Local body coordinates keep the gift, kiss and dance in the same continuous pose.
+   Rotation projects a shared horizontal orbit, with the farther person drawn first. */
+typedef struct {
+    Point center;
+    float turn, depth, lean, step, skirt, shade;
+    int girl;
+} Person;
+static const Tint skin={1.0f,0.76f,0.61f}, blue={0.37f,0.68f,1.0f};
+static const Tint hair={0.43f,0.24f,0.17f}, pink={0.98f,0.48f,0.77f};
+
+static Point body_point(const Person *p,float x,float y) {
+    float lean=p->lean*sat((0.26f-y)/0.69f);
+    return (Point){p->center.x+(x+lean)*p->turn,p->center.y+y};
+}
+static Tint body_color(const Person *p,Tint color) {
+    return (Tint){color.r*p->shade,color.g*p->shade,color.b*p->shade};
+}
+static void body_ellipse(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p,
+                         float x,float y,float rx,float ry,Tint color,unsigned char ch) {
+    ellipse(grid,body_point(p,x,y),rx*(0.70f+0.30f*fabsf(p->turn)),ry,body_color(p,color),ch);
+}
+static void body_limb(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p,
+                      float ax,float ay,float bx,float by,float radius,Tint color) {
+    limb(grid,body_point(p,ax,ay),body_point(p,bx,by),radius,body_color(p,color));
+}
+static void person_dress(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p) {
+    for (int row=0;row<SCENE_ROWS;row++) {
+        float u=(world_y(row)-p->center.y-0.10f)/0.46f;
+        if (u<0 || u>1) continue;
+        float half=lerp(0.085f,0.215f+p->skirt,u)*(0.78f+0.22f*fabsf(p->turn));
+        float center=p->center.x+0.025f*p->skirt*sinf(u*4)*p->turn;
+        for (int col=0;col<SCENE_COLS;col++) {
+            float x=world_x(col)-center;
+            float hem=0.012f*sinf(x*48+p->skirt*12)*u*u;
+            if (fabsf(x)<half && u<1+hem) {
+                float pleat=0.72f+0.28f*cosf(x*80-u*3+p->skirt*8);
+                paint(grid,col,row,body_color(p,pink),pleat,fabsf(x)>half-0.02f?'/':'v');
+            }
+        }
+    }
+}
+static void person_body(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p,float kiss) {
+    float direction=p->girl?-1.0f:1.0f;
+    Tint clothes=p->girl?pink:blue;
+    Tint trousers={0.27f,0.39f,0.64f};
+    for (int k=0;k<2;k++) {
+        float side=k?1.0f:-1.0f;
+        float hip=side*0.07f,foot=side*0.105f+p->step*side;
+        body_limb(grid,p,hip,p->girl?0.45f:0.22f,foot,0.67f,
+                  p->girl?0.030f:0.049f,p->girl?skin:trousers);
+        body_ellipse(grid,p,foot+direction*0.025f,0.70f,p->girl?0.067f:0.081f,0.028f,
+                     p->girl?pink:(Tint){0.48f,0.57f,0.70f},'=');
+    }
+    if (p->girl) body_ellipse(grid,p,0.04f,-0.27f,0.13f,0.29f,hair,'~');
+    body_ellipse(grid,p,0,-0.025f,p->girl?0.115f:0.14f,p->girl?0.24f:0.29f,clothes,p->girl?'x':'#');
+    if (p->girl) person_dress(grid,p);
+    else for (int k=0;k<4;k++)
+        body_ellipse(grid,p,0.02f,-0.15f+(float)k*0.10f,0.009f,0.012f,pearl,':');
+    body_limb(grid,p,0,-0.38f,0,-0.25f,0.040f,skin);
+    body_ellipse(grid,p,0,-0.445f,0.103f,0.139f,skin,'o');
+    body_ellipse(grid,p,-direction*0.025f,-0.55f,0.110f,0.068f,hair,p->girl?'~':'#');
+    body_ellipse(grid,p,-direction*0.085f,-0.46f,0.034f,p->girl?0.148f:0.085f,hair,p->girl?'~':'#');
+    /* Back-of-head coverage and closed eyes make the turn and kiss readable. */
+    float back=sat(p->depth*4);
+    if (back>0.65f) body_ellipse(grid,p,0,-0.455f,0.101f,0.13f,hair,'~');
+    else {
+        body_ellipse(grid,p,direction*0.106f,-0.425f,0.024f,0.021f,skin,p->girl?'<':'>');
+        Point eye=body_point(p,direction*0.062f,-0.478f);
+        paint(grid,(int)roundf(grid_x(eye.x)),(int)roundf(grid_y(eye.y)),
+              (Tint){0.16f,0.12f,0.17f},1,kiss>0.5f?'-':'*');
+        body_ellipse(grid,p,direction*0.077f,-0.405f,0.022f,0.018f,
+                     tint_mix(skin,(Tint){1,0.35f,0.48f},0.55f),':');
+        body_ellipse(grid,p,direction*0.096f,-0.375f,0.017f,0.010f,
+                     (Tint){0.95f,0.38f,0.49f},kiss>0.5f?'o':'_');
+    }
+}
+static void person_arm(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p,
+                       float side,Point elbow,Point hand) {
+    Point shoulder=body_point(p,side*0.105f,-0.18f);
+    limb(grid,shoulder,elbow,p->girl?0.032f:0.043f,body_color(p,p->girl?skin:blue));
+    limb(grid,elbow,hand,0.027f,body_color(p,skin));
+    ellipse(grid,hand,0.030f,0.024f,body_color(p,skin),'o');
+}
+static void person_arms(AsciiCell grid[SCENE_ROWS][SCENE_COLS],const Person *p,
+                        const Person *partner,float offer,float receive,float hug,Point flowers) {
+    if (!p->girl) {
+        Point hand=point_mix(body_point(p,0.15f,0.19f),body_point(p,0.475f,0.04f),offer);
+        hand=point_mix(hand,body_point(p,0.15f,0.28f),receive);
+        hand=point_mix(hand,body_point(partner,0.075f,0.04f),hug);
+        Point elbow=point_mix(body_point(p,0.23f,0.10f),body_point(p,0.24f,-0.035f),hug);
+        person_arm(grid,p,1,elbow,hand);
+        hand=point_mix(body_point(p,-0.11f,0.22f),body_point(partner,-0.035f,-0.13f),hug);
+        elbow=point_mix(body_point(p,-0.20f,0.07f),body_point(p,-0.15f,0.04f),hug);
+        person_arm(grid,p,-1,elbow,hand);
+    } else {
+        Point hand=point_mix(body_point(p,-0.15f,0.29f),body_point(p,-0.355f,0.055f),offer);
+        hand=point_mix(hand,body_point(p,-0.16f,0.08f),receive);
+        hand=point_mix(hand,body_point(partner,-0.06f,-0.10f),hug);
+        Point elbow=point_mix(body_point(p,-0.20f,0.08f),body_point(p,-0.23f,-0.10f),hug);
+        person_arm(grid,p,-1,elbow,hand);
+        Point other=point_mix(body_point(p,0.13f,0.24f),body_point(p,-0.15f,0.12f),receive);
+        other=point_mix(other,flowers,hug);
+        person_arm(grid,p,1,body_point(p,0.17f,0.08f),other);
+    }
+}
+static void kiss_hearts(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t) {
+    static const char *shape[]={" ** ** ","*******"," ***** ","  ***  ","   *   "};
+    for (int k=0;k<3;k++) {
+        float age=t-APPROACH_END-0.3f-(float)k*0.6f;
+        if (age<0 || age>3.0f) continue;
+        float alpha=ease(0,0.4f,age)*(1-ease(1.8f,3,age));
+        Point center={((float)k-1)*0.17f+0.025f*sinf(age*2),-0.66f-0.065f*age};
+        for (int y=0;y<5;y++) for (int x=0;x<7;x++) if (shape[y][x]!=' ')
+            spark(grid,(Point){center.x+((float)x-3)*0.014f,center.y+(float)y*0.018f},
+                  '*',(Tint){1,0.38f,0.62f},alpha*1.5f);
+    }
+}
+static void garden(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t,int foreground) {
+    const Tint green={0.34f,0.86f,0.43f};
+    static const Tint petals[]={{1,0.43f,0.68f},{0.78f,0.51f,1},{1,0.84f,0.42f},
+                               {0.45f,0.73f,1},{1,0.66f,0.79f}};
+    for (int k=0;k<34;k++) {
+        float angle=6.2831853f*(float)k/34;
+        if ((sinf(angle)>0)!=(foreground!=0)) continue;
+        float start=SPIN_START+0.12f+(float)(k%9)*0.23f+random01(k,76)*0.7f;
+        float grow=ease(start,start+1.9f,t),open=ease(start+0.8f,start+2.7f,t);
+        if (grow<0.015f) continue;
+        Point root={1.15f*cosf(angle),0.72f+0.20f*sinf(angle)};
+        float height=0.15f+random01(k,71)*0.19f;
+        float sway=0.018f*sinf(t*1.6f+angle*2)*grow;
+        Point tip={root.x+sway,root.y-height*grow};
+        for (int j=0;j<8;j++) {
+            float u=(float)j/7;
+            Point stem={lerp(root.x,tip.x,u)+0.015f*sinf(u*3.14159265f+angle)*grow,
+                        lerp(root.y,tip.y,u)};
+            spark(grid,stem,'|',green,1.5f);
+        }
+        for (int side=-1;side<=1;side+=2) {
+            Point leaf=point_mix(root,tip,side<0?0.38f:0.62f);
+            Point end={leaf.x+(float)side*0.050f*grow,leaf.y-0.032f*grow};
+            limb(grid,leaf,end,0.009f,green);
+            ellipse(grid,end,0.024f*grow,0.012f,green,side<0?'/':'\\');
+        }
+        Tint color=petals[k%5];
+        if (open<0.1f) ellipse(grid,tip,0.016f,0.023f,color,'o');
+        else {
+            float size=(0.031f+random01(k,77)*0.012f)*open;
+            for (int petal=0;petal<5;petal++) {
+                float a=6.2831853f*(float)petal/5-1.5707963f;
+                Point petal_center={tip.x+cosf(a)*size,tip.y+sinf(a)*size};
+                ellipse(grid,petal_center,size*0.72f,size*0.60f,color,'@');
+            }
+            ellipse(grid,tip,0.016f,0.015f,gold,'*');
+        }
+    }
+}
 static void people(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t) {
-    const Tint skin={1.0f,0.76f,0.56f}, blue={0.32f,0.62f,0.89f}, pants={0.24f,0.36f,0.57f};
-    const Tint hair={0.45f,0.25f,0.18f}, pink={0.86f,0.46f,0.73f};
     float offer=ease(GIFT_START,27.4f,t),receive=ease(27.4f,GIFT_END,t);
-    float nod=0.025f*sinf(receive*3.14159265f);
-    Point boy_hand=point_mix((Point){-0.28f,0.19f},(Point){0.045f,0.04f},offer);
-    boy_hand=point_mix(boy_hand,(Point){-0.28f,0.28f},ease(28.7f,29.8f,t));
-    Point girl_hand=point_mix((Point){0.28f,0.29f},(Point){0.075f,0.055f},offer);
-    girl_hand=point_mix(girl_hand,(Point){0.27f,0.08f},receive);
-    Point flowers=point_mix((Point){-0.28f,0.19f},(Point){0.055f,0.045f},offer);
-    flowers=point_mix(flowers,(Point){0.27f,0.08f},receive);
-    /* Shoes and legs. The boy wears trousers, the girl a flared dress. */
-    limb(grid,(Point){-0.50f,0.22f},(Point){-0.53f,0.67f},0.049f,pants);
-    limb(grid,(Point){-0.36f,0.22f},(Point){-0.31f,0.67f},0.049f,pants);
-    ellipse(grid,(Point){-0.50f,0.69f},0.084f,0.035f,(Tint){0.42f,0.51f,0.61f},'=');
-    ellipse(grid,(Point){-0.28f,0.69f},0.084f,0.035f,(Tint){0.42f,0.51f,0.61f},'=');
-    limb(grid,(Point){0.36f,0.45f},(Point){0.33f,0.68f},0.030f,skin);
-    limb(grid,(Point){0.49f,0.45f},(Point){0.53f,0.68f},0.030f,skin);
-    ellipse(grid,(Point){0.30f,0.70f},0.067f,0.026f,pink,'=');
-    ellipse(grid,(Point){0.51f,0.70f},0.067f,0.026f,pink,'=');
-    /* Long hair sits behind the face and dress. */
-    ellipse(grid,(Point){0.47f,-0.27f+nod},0.13f,0.29f,hair,'~');
-    ellipse(grid,(Point){-0.43f,-0.025f},0.14f,0.29f,blue,'#');
-    ellipse(grid,(Point){0.43f,-0.035f},0.115f,0.24f,pink,'x');
-    dress(grid,0.009f*sinf(t*1.1f));
-    limb(grid,(Point){-0.55f,-0.20f},(Point){-0.63f,0.07f},0.043f,blue);
-    limb(grid,(Point){-0.63f,0.07f},(Point){-0.54f,0.22f},0.032f,skin);
-    /* Boy's offering arm and girl's receiving hands interpolate independently. */
-    Point elbow=point_mix((Point){-0.25f,0.07f},(Point){-0.18f,0.11f},offer);
-    limb(grid,(Point){-0.33f,-0.19f},elbow,0.045f,blue);
-    limb(grid,elbow,boy_hand,0.028f,skin);
-    limb(grid,(Point){0.33f,-0.18f},(Point){0.23f,0.08f},0.035f,skin);
-    limb(grid,(Point){0.23f,0.08f},girl_hand,0.026f,skin);
-    Point other=point_mix((Point){0.56f,0.24f},(Point){0.28f,0.12f},receive);
-    limb(grid,(Point){0.53f,-0.17f},(Point){0.60f,0.08f},0.032f,skin);
-    limb(grid,(Point){0.60f,0.08f},other,0.026f,skin);
-    limb(grid,(Point){-0.43f,-0.38f},(Point){-0.43f,-0.25f},0.043f,skin);
-    limb(grid,(Point){0.43f,-0.35f+nod},(Point){0.43f,-0.24f},0.038f,skin);
-    ellipse(grid,(Point){-0.43f,-0.45f},0.105f,0.142f,skin,'o');
-    ellipse(grid,(Point){0.42f,-0.43f+nod},0.10f,0.136f,skin,'o');
-    ellipse(grid,(Point){-0.46f,-0.55f},0.115f,0.073f,hair,'#');
-    ellipse(grid,(Point){-0.52f,-0.48f},0.033f,0.095f,hair,'#');
-    ellipse(grid,(Point){0.45f,-0.54f+nod},0.103f,0.064f,hair,'~');
-    ellipse(grid,(Point){0.51f,-0.42f+nod},0.035f,0.135f,hair,'~');
-    /* Profile noses, eyes and a small smile face inward. */
-    ellipse(grid,(Point){-0.323f,-0.43f},0.028f,0.025f,skin,'>');
-    ellipse(grid,(Point){0.317f,-0.41f+nod},0.025f,0.022f,skin,'<');
-    paint(grid,(int)roundf(grid_x(-0.355f)),(int)roundf(grid_y(-0.485f)),(Tint){0.12f,0.14f,0.19f},1,'*');
-    paint(grid,(int)roundf(grid_x(0.35f)),(int)roundf(grid_y(-0.46f+nod)),(Tint){0.12f,0.14f,0.19f},1,'*');
-    paint(grid,(int)roundf(grid_x(-0.35f)),(int)roundf(grid_y(-0.365f)),(Tint){0.70f,0.29f,0.25f},1,'/');
-    paint(grid,(int)roundf(grid_x(0.35f)),(int)roundf(grid_y(-0.35f+nod)),(Tint){0.75f,0.27f,0.39f},1,'\\');
-    for (int k=0;k<4;k++) paint(grid,(int)roundf(grid_x(-0.41f)),(int)roundf(grid_y(-0.15f+(float)k*0.10f)),pearl,0.8f,':');
-    bouquet(grid,flowers);
-    ellipse(grid,boy_hand,0.030f,0.024f,skin,'o');
-    ellipse(grid,girl_hand,0.028f,0.023f,skin,'o');
+    float approach=ease(GIFT_END,APPROACH_END,t),hug=ease(KISS_END,HUG_READY,t);
+    float kiss=ease(APPROACH_END-0.5f,APPROACH_END,t)*(1-ease(KISS_END,KISS_END+0.6f,t));
+    float spin_time=fmaxf(0,fminf(t,SPIN_END)-SPIN_START);
+    /* Integral of a smooth speed ramp; ease to rest before dissolving. */
+    float ramp=ease(0,1.6f,spin_time);
+    float u=sat(spin_time/1.6f),v=sat((spin_time-(SPIN_END-SPIN_START-1.2f))/1.2f);
+    float angle=1.8f*((spin_time<1.6f?1.6f*(u*u*u-0.5f*u*u*u*u):spin_time-0.8f)
+                      -1.2f*(v*v*v-0.5f*v*v*v*v));
+    float turn=cosf(angle),depth=sinf(angle);
+    float separation=lerp(0.43f,0.183f,approach);
+    separation=lerp(separation,0.142f,hug);
+    float walk=0.018f*sinf(approach*12.56637f)*sinf(approach*3.14159265f);
+    float bob=0.009f*ramp*sinf(angle*2);
+    Person boy={{-separation*turn,-0.040f*depth+bob},turn,depth,
+                0.075f*approach*(1-hug)+0.010f*hug,walk,0,1-0.10f*sat(depth),0};
+    Person girl={{separation*turn,0.040f*depth+bob},turn,-depth,
+                 -0.075f*approach*(1-hug)-0.010f*hug,-walk,0.040f*ramp,1-0.10f*sat(-depth),1};
+    Point flowers=point_mix(body_point(&boy,0.15f,0.19f),body_point(&boy,0.485f,0.045f),offer);
+    flowers=point_mix(flowers,body_point(&girl,-0.16f,0.08f),receive);
+    flowers=point_mix(flowers,body_point(&girl,0.19f,0.04f),hug);
+    garden(grid,t,0);
+    const Person *back=depth>=0?&boy:&girl,*front=depth>=0?&girl:&boy;
+    person_body(grid,back,kiss);
+    person_arms(grid,back,front,offer,receive,hug,flowers);
+    if (back->girl) bouquet(grid,flowers);
+    person_body(grid,front,kiss);
+    person_arms(grid,front,back,offer,receive,hug,flowers);
+    if (front->girl) bouquet(grid,flowers);
+    /* Before transfer, the bouquet is held in the boy's offering hand. */
+    if (receive<0.5f) bouquet(grid,flowers);
+    kiss_hearts(grid,t);
+    garden(grid,t,1);
 }
 static void couple(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t) {
     AsciiCell figure[SCENE_ROWS][SCENE_COLS]={0};
     if (t<FINALE_BURST || t>TITLE_START+0.4f) return;
-    people(figure,t);
+    people(figure,fminf(t,DISSOLVE_START));
     float form=ease(FINALE_BURST,COUPLE_READY,t);
     float dissolve=ease(DISSOLVE_START,TITLE_START+0.4f,t);
     for (int y=0;y<SCENE_ROWS;y++) for (int x=0;x<SCENE_COLS;x++) {
@@ -309,7 +430,7 @@ void celebration_render(float time,AsciiCell cells[SCENE_ROWS][SCENE_COLS]) {
     rocket(cells,&finale,time,1);
     couple(cells,time);
     if (time>=TITLE_START) title(cells,time);
-    float fade=1-ease(37.0f,SCENE_DURATION,time);
+    float fade=1-ease(FADE_START,STORY_DURATION,time);
     if (fade<1) for (int y=0;y<SCENE_ROWS;y++) for (int x=0;x<SCENE_COLS;x++) {
         AsciiCell *c=&cells[y][x];
         c->r=(unsigned char)((float)c->r*fade);

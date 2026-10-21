@@ -183,7 +183,12 @@ int main(int argc, char **argv) {
     paused = options.paused;
     start = GetTime();
     if (options.export_dir) {
-        static const float times[] = {3.0f,9.0f,12.1f,13.1f,14.6f,16.0f,18.2f,21.5f,23.8f,25.2f,27.1f,29.3f,31.2f,34.0f};
+        static const float times[] = {2.0f,5.8f,7.0f,9.0f,11.0f,13.0f,14.5f,15.8f,16.0f,
+                                     INTRO_DURATION+3.0f,INTRO_DURATION+9.0f,
+                                     INTRO_DURATION+14.6f,INTRO_DURATION+18.2f,
+                                     INTRO_DURATION+23.8f,INTRO_DURATION+27.1f,
+                                     INTRO_DURATION+32.0f,INTRO_DURATION+34.5f,
+                                     INTRO_DURATION+39.0f,INTRO_DURATION+46.0f};
         for (int i=0;i<(int)(sizeof(times)/sizeof(times[0]));i++) {
             char path[1024];
             int n = snprintf(path,sizeof(path),"%s/frame_%04d.png",options.export_dir,(int)(times[i]*100));

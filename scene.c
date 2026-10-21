@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "celebration.h"
+#include "intro.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -54,12 +55,12 @@ float scene_wrap_time(float seconds) {
 SceneState scene_state(float seconds) {
     SceneState s;
     float approach;
-    s.time = scene_wrap_time(seconds);
+    s.time = fmaxf(0,scene_wrap_time(seconds)-INTRO_DURATION);
     approach = smooth(4.0f, 13.0f, s.time);
     s.zoom = 1.0f + 0.075f*smooth(1.0f,4.0f,s.time) + 7.8f*approach*approach;
     s.pupil_radius = (0.145f + 0.12f*smooth(4.0f,9.0f,s.time))*s.zoom;
     s.stars = smooth(3.8f, 6.5f, s.time);
-    s.exposure = smooth(0.0f,0.85f,s.time)*(1.0f-smooth(37.0f,SCENE_DURATION,s.time));
+    s.exposure = 1.0f-smooth(FADE_START,STORY_DURATION,s.time);
     s.stars *= 1.0f-0.86f*smooth(11.0f,13.0f,s.time);
     s.stars *= 1.0f-smooth(29.0f,32.0f,s.time);
     return s;
@@ -67,7 +68,7 @@ SceneState scene_state(float seconds) {
 
 static Light eye_surface(float x, float y, const SceneState *s, float grain, float *density) {
     float r = sqrtf(x*x+y*y), angle = atan2f(y,x);
-    float opening = mix(0.13f,1.0f,smooth(0.0f,1.05f,s->time));
+    float opening = 1.0f; /* Already open in the preceding portrait. */
     float lid = 0.57f*powf(fmaxf(0,1.0f-powf(fabsf(x)/1.92f,1.7f)),0.72f)*opening;
     float lid_y = y + 0.025f + 0.025f*x;
     float inside = 1.0f-smooth(lid-0.018f,lid+0.018f,fabsf(lid_y));
@@ -151,6 +152,25 @@ static void star_field(const SceneState *s, AsciiCell stars[SCENE_ROWS][SCENE_CO
     }
 }
 
+/* Identical pupil, iris and reflection for the portrait and its destination. */
+static AsciiCell portrait_eye(float x,float y) {
+    SceneState s=scene_state(INTRO_DURATION);
+    float d,grain=noise((int)floorf(x*72),(int)floorf(y*41),11);
+    float r=sqrtf(x*x+y*y);
+    float portal=1-smooth(s.pupil_radius-0.015f,s.pupil_radius+0.015f,r);
+    Light color=eye_surface(x,y,&s,grain,&d);
+    AsciiCell out=cell(glyph(d,grain),color,1-portal);
+    float gx=(x-0.20f)/0.095f,gy=(y+0.075f)/0.22f;
+    float glint=(1-smooth(0.40f,1,gx*gx+gy*gy))*(0.45f+0.55f*wave(y*166));
+    if (glint>0.04f) {
+        out.r=(unsigned char)mix(out.r,223,glint);
+        out.g=(unsigned char)mix(out.g,231,glint);
+        out.b=(unsigned char)mix(out.b,216,glint);
+        if (glint>0.20f) out.glyph=glyph(0.61f+0.29f*glint,grain);
+    }
+    return out;
+}
+
 void scene_render(float seconds, AsciiCell cells[SCENE_ROWS][SCENE_COLS]) {
     SceneState s = scene_state(seconds);
     AsciiCell stars[SCENE_ROWS][SCENE_COLS];
@@ -194,4 +214,5 @@ void scene_render(float seconds, AsciiCell cells[SCENE_ROWS][SCENE_COLS]) {
         }
     }
     celebration_render(s.time,cells);
+    intro_render(scene_wrap_time(seconds),cells,portrait_eye);
 }
