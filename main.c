@@ -1,6 +1,7 @@
 // All scene imagery is drawn as individual, colored ASCII glyphs.
 #include "raylib.h"
 #include "scene.h"
+#include "ascii_draw.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,48 +51,6 @@ static bool parse_options(int argc, char **argv, Options *o) {
     if (o->capture && o->export_dir) return false;
     if (o->width && !o->capture && !o->export_dir) return false;
     return true;
-}
-
-static Font load_ascii_font(const char *requested) {
-    const char *paths[] = {
-        "C:/Windows/Fonts/consola.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
-        "/System/Library/Fonts/Menlo.ttc"
-    };
-    Font font = GetFontDefault();
-    const char *path = requested;
-    char windows_font[512];
-    const char *windows_dir = getenv("WINDIR");
-    if (!path && windows_dir) {
-        snprintf(windows_font,sizeof(windows_font),"%s/Fonts/consola.ttf",windows_dir);
-        if (FileExists(windows_font)) path = windows_font;
-    }
-    for (int i=0;!path && i<(int)(sizeof(paths)/sizeof(paths[0]));i++)
-        if (FileExists(paths[i])) path = paths[i];
-    if (path) font = LoadFontEx(path,64,NULL,95);
-    if (font.texture.id==0) font = GetFontDefault();
-    SetTextureFilter(font.texture,TEXTURE_FILTER_BILINEAR);
-    return font;
-}
-
-static void draw_scene(float time, Font font, int width, int height) {
-    AsciiCell cells[SCENE_ROWS][SCENE_COLS];
-    float scale = fminf((float)width/SCENE_WIDTH,(float)height/SCENE_HEIGHT);
-    float cell_w = CELL_WIDTH*scale, cell_h = CELL_HEIGHT*scale;
-    float left = ((float)width-SCENE_WIDTH*scale)*0.5f;
-    float top = ((float)height-SCENE_HEIGHT*scale)*0.5f;
-    scene_render(time,cells);
-    for (int row=0;row<SCENE_ROWS;row++) for (int col=0;col<SCENE_COLS;col++) {
-        AsciiCell c = cells[row][col];
-        if (c.glyph!=' ') {
-            int index = GetGlyphIndex(font,c.glyph);
-            float advance = (float)font.glyphs[index].advanceX*cell_h/(float)font.baseSize;
-            DrawTextCodepoint(font,c.glyph,
-                (Vector2){left+(float)col*cell_w+(cell_w-advance)*0.5f,top+(float)row*cell_h},
-                cell_h,(Color){c.r,c.g,c.b,255});
-        }
-    }
 }
 
 /* Allocate at framebuffer resolution, never upscale an old low-resolution frame. */
@@ -144,16 +103,19 @@ static bool capture_frame(RenderTexture2D canvas, const char *path) {
     return ok;
 }
 
-static void render_canvas(RenderTexture2D canvas, Font font, float time) {
+static void render_canvas(RenderTexture2D canvas, AsciiRenderer *renderer, float time) {
+    /* Larger grids must not consume the default Windows thread stack. */
+    static AsciiCell cells[SCENE_ROWS][SCENE_COLS];
+    scene_render(time,cells);
     BeginTextureMode(canvas);
     ClearBackground(BLACK);
-    draw_scene(time,font,canvas.texture.width,canvas.texture.height);
+    ascii_renderer_draw(renderer,&cells[0][0],canvas.texture.width,canvas.texture.height);
     EndTextureMode();
 }
 
 int main(int argc, char **argv) {
     Options options = {0};
-    Font font;
+    AsciiRenderer renderer={0};
     RenderTexture2D canvas = {0};
     float time, speed = 1.0f;
     bool paused, show_help = false;
@@ -173,17 +135,20 @@ int main(int argc, char **argv) {
     SetWindowMinSize(640,360);
     if (options.fullscreen) toggle_fullscreen();
     SetTargetFPS(60);
-    font = load_ascii_font(options.font_path);
     if (!resize_canvas(&canvas,options.width?options.width:GetRenderWidth(),
-                       options.height?options.height:GetRenderHeight())) {
-        if (font.texture.id!=GetFontDefault().texture.id) UnloadFont(font);
+                       options.height?options.height:GetRenderHeight()) ||
+        !ascii_renderer_init(&renderer,options.font_path) ||
+        !ascii_renderer_resize(&renderer,canvas.texture.width,canvas.texture.height)) {
+        ascii_renderer_unload(&renderer);
+        if (canvas.id) UnloadRenderTexture(canvas);
         CloseWindow(); return 1;
     }
     time = options.time;
     paused = options.paused;
     start = GetTime();
     if (options.export_dir) {
-        static const float times[] = {2.0f,5.8f,7.0f,9.0f,11.0f,13.0f,14.5f,15.8f,16.0f,
+        static const float times[] = {0.6f,1.6f,2.2f,3.8f,5.8f,7.0f,8.4f,9.5f,12.0f,14.0f,
+                                     16.5f,18.5f,20.5f,22.8f,23.9f,INTRO_DURATION,
                                      INTRO_DURATION+3.0f,INTRO_DURATION+9.0f,
                                      INTRO_DURATION+14.6f,INTRO_DURATION+18.2f,
                                      INTRO_DURATION+23.8f,INTRO_DURATION+27.1f,
@@ -193,7 +158,7 @@ int main(int argc, char **argv) {
             char path[1024];
             int n = snprintf(path,sizeof(path),"%s/frame_%04d.png",options.export_dir,(int)(times[i]*100));
             if (n<0 || n>=(int)sizeof(path)) { result=1; break; }
-            render_canvas(canvas,font,times[i]);
+            render_canvas(canvas,&renderer,times[i]);
             if (!capture_frame(canvas,path)) { result=1; break; }
         }
     } else {
@@ -204,6 +169,9 @@ int main(int argc, char **argv) {
             if (!options.width && !resize_canvas(&canvas,GetRenderWidth(),GetRenderHeight())) {
                 result=1; break;
             }
+            if (!ascii_renderer_resize(&renderer,canvas.texture.width,canvas.texture.height)) {
+                result=1; break;
+            }
             if (IsKeyPressed(KEY_SPACE)) paused = !paused;
             if (IsKeyPressed(KEY_R)) { time=0; paused=false; }
             if (IsKeyPressed(KEY_H)) show_help = !show_help;
@@ -212,7 +180,7 @@ int main(int argc, char **argv) {
             if (IsKeyPressed(KEY_RIGHT)) { time=scene_wrap_time(time+1.0f/30.0f); paused=true; }
             if (IsKeyPressed(KEY_LEFT)) { time=scene_wrap_time(time-1.0f/30.0f); paused=true; }
             if (!paused && !options.capture) time=scene_wrap_time(time+GetFrameTime()*speed);
-            render_canvas(canvas,font,time);
+            render_canvas(canvas,&renderer,time);
             BeginDrawing();
             ClearBackground(BLACK);
             DrawTexturePro(canvas.texture,
@@ -241,7 +209,7 @@ int main(int argc, char **argv) {
     }
     if (frame_count>0) printf("Rendered %d frames in %.3f s\n",frame_count,GetTime()-start);
     UnloadRenderTexture(canvas);
-    if (font.texture.id!=GetFontDefault().texture.id) UnloadFont(font);
+    ascii_renderer_unload(&renderer);
     CloseWindow();
     return result;
 }

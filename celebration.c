@@ -41,12 +41,17 @@ static void light_cell(AsciiCell grid[SCENE_ROWS][SCENE_COLS],int x,int y,
         c->b=(unsigned char)fminf(255,(float)c->b+b);
     }
 }
-static void spark(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point p,unsigned char ch,Tint color,float intensity) {
+static void spark_spread(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point p,unsigned char ch,Tint color,float intensity,int radius) {
     float x=grid_x(p.x),y=grid_y(p.y);
     int ix=(int)floorf(x),iy=(int)floorf(y);
-    float fx=x-(float)ix,fy=y-(float)iy;
-    for (int dy=0;dy<2;dy++) for (int dx=0;dx<2;dx++)
-        light_cell(grid,ix+dx,iy+dy,ch,color,intensity*(dx?fx:1-fx)*(dy?fy:1-fy));
+    for (int dy=1-radius;dy<=radius;dy++) for (int dx=1-radius;dx<=radius;dx++) {
+        float weight=fmaxf(0,1-fabsf(x-(float)(ix+dx))/(float)radius)
+                    *fmaxf(0,1-fabsf(y-(float)(iy+dy))/(float)radius);
+        light_cell(grid,ix+dx,iy+dy,ch,color,intensity*weight);
+    }
+}
+static void spark(AsciiCell grid[SCENE_ROWS][SCENE_COLS],Point p,unsigned char ch,Tint color,float intensity) {
+    spark_spread(grid,p,ch,color,intensity,SCENE_DETAIL);
 }
 
 static Point rocket_position(const Shell *s,float u) {
@@ -384,7 +389,7 @@ static void couple(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t) {
         float alpha=ease(FINALE_BURST,FINALE_BURST+0.3f,t)*(1-dissolve);
         alpha*=1-ease(0.30f+0.55f*random01(seed,15),1,dissolve);
         color=tint_mix(gold,color,form);
-        spark(grid,p,form<0.6f || dissolve>0.15f?'.':c.glyph,color,alpha);
+        spark_spread(grid,p,form<0.6f || dissolve>0.15f?'.':c.glyph,color,alpha,1);
     }
 }
 
@@ -410,15 +415,16 @@ static const unsigned char *letter(char c) {
 }
 static void title(AsciiCell grid[SCENE_ROWS][SCENE_COLS],float t) {
     const char *message="4 years together";
-    int length=(int)strlen(message),x0=(SCENE_COLS-(length*6-1)*2)/2;
-    int y0=SCENE_ROWS/2-7;
+    int size=2*SCENE_DETAIL;
+    int length=(int)strlen(message),x0=(SCENE_COLS-(length*6-1)*size)/2;
+    int y0=SCENE_ROWS/2-7*SCENE_DETAIL;
     float visible=ease(TITLE_START,TITLE_START+1.3f,t);
     for (int k=0;k<length;k++) {
         const unsigned char *bits=letter(message[k]);
         for (int y=0;y<7;y++) for (int x=0;x<5;x++) if (bits[y]&(1u<<(4-x))) {
             Tint color=tint_mix((Tint){1,0.80f,0.88f},(Tint){0.76f,0.51f,1},(float)y/7);
-            for (int dy=0;dy<2;dy++) for (int dx=0;dx<2;dx++)
-                light_cell(grid,x0+k*12+x*2+dx,y0+y*2+dy,'#',color,visible);
+            for (int dy=0;dy<size;dy++) for (int dx=0;dx<size;dx++)
+                light_cell(grid,x0+k*6*size+x*size+dx,y0+y*size+dy,'#',color,visible);
         }
     }
 }

@@ -115,11 +115,11 @@ static Light eye_surface(float x, float y, const SceneState *s, float grain, flo
 static void star_glyph(AsciiCell stars[SCENE_ROWS][SCENE_COLS], float x, float y,
                        unsigned char ch, float brightness) {
     int ix=(int)floorf(x), iy=(int)floorf(y);
-    float fx=x-(float)ix, fy=y-(float)iy;
-    for (int dy=0;dy<=1;dy++) for (int dx=0;dx<=1;dx++) {
+    for (int dy=1-SCENE_DETAIL;dy<=SCENE_DETAIL;dy++) for (int dx=1-SCENE_DETAIL;dx<=SCENE_DETAIL;dx++) {
         int col=ix+dx, row=iy+dy;
         if (col>=0 && col<SCENE_COLS && row>=0 && row<SCENE_ROWS) {
-            float weight=(dx?fx:1-fx)*(dy?fy:1-fy);
+            float weight=fmaxf(0,1-fabsf(x-(float)col)/SCENE_DETAIL)
+                        *fmaxf(0,1-fabsf(y-(float)row)/SCENE_DETAIL);
             AsciiCell c=cell(ch,(Light){0.79f,0.85f,0.87f},brightness*weight);
             if (c.r>stars[row][col].r) stars[row][col]=c;
         }
@@ -146,8 +146,8 @@ static void star_field(const SceneState *s, AsciiCell stars[SCENE_ROWS][SCENE_CO
         star_glyph(stars,x,y,'*',brightness);
         for (int d=-3;d<=3;d++) if (d) {
             float distance=(float)(d<0?-d:d);
-            star_glyph(stars,x+(float)d,y,'-',brightness*(0.65f-0.14f*distance));
-            if (d>=-2 && d<=2) star_glyph(stars,x,y+(float)d,'|',brightness*(0.68f-0.20f*distance));
+            star_glyph(stars,x+(float)(d*SCENE_DETAIL),y,'-',brightness*(0.65f-0.14f*distance));
+            if (d>=-2 && d<=2) star_glyph(stars,x,y+(float)(d*SCENE_DETAIL),'|',brightness*(0.68f-0.20f*distance));
         }
     }
 }
@@ -172,10 +172,21 @@ static AsciiCell portrait_eye(float x,float y) {
 }
 
 void scene_render(float seconds, AsciiCell cells[SCENE_ROWS][SCENE_COLS]) {
+    float time=scene_wrap_time(seconds);
+    /* The room is opaque until the final eye splice. Avoid calculating an
+       entire hidden iris/celebration frame underneath every intro frame. */
+    if (time<INTRO_EYE_BLEND_START) {
+        intro_render(time,cells,portrait_eye);
+        return;
+    }
     SceneState s = scene_state(seconds);
     AsciiCell stars[SCENE_ROWS][SCENE_COLS];
     star_field(&s,stars);
-    for (int row=0;row<SCENE_ROWS;row++) {
+    int row;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) num_threads(4)
+#endif
+    for (row=0;row<SCENE_ROWS;row++) {
         for (int col=0;col<SCENE_COLS;col++) {
             float x = ((float)col+0.5f-SCENE_COLS*0.5f)*CELL_WIDTH/(SCENE_HEIGHT*0.5f);
             float y = ((float)row+0.5f-SCENE_ROWS*0.5f)*CELL_HEIGHT/(SCENE_HEIGHT*0.5f);
@@ -214,5 +225,5 @@ void scene_render(float seconds, AsciiCell cells[SCENE_ROWS][SCENE_COLS]) {
         }
     }
     celebration_render(s.time,cells);
-    intro_render(scene_wrap_time(seconds),cells,portrait_eye);
+    intro_render(time,cells,portrait_eye);
 }
